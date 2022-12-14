@@ -1,4 +1,4 @@
-import { Client } from "discord.js";
+import { Client, Embed, EmbedBuilder } from "discord.js";
 import Gamedig from "gamedig";
 import { Database, ServerEntry, UserEntry } from "./database/jsondb";
 
@@ -89,7 +89,25 @@ class ServerEventManager {
         setTimeout(() => ServerEventManager.performServerSweep(client), 30000);
     }
 
-    static async serverSendEvent(client: Client, event: ServerEventList, server: ServerEntry, player_name?: string) {
+    static generateGenericEmbed(server: ServerEntry, status?: Gamedig.QueryResult) {
+        if(status == undefined) {
+            let embd = new EmbedBuilder().setTitle("Server Offline").setDescription(`Game: ${server.protocol}`).setColor(0xFF0000);
+            return embd;
+        }
+        let embd = new EmbedBuilder()
+            .setTitle("Server Information: Online")
+            .setDescription(`Game: ${server.protocol}\nName: ${status.name}\nPlayers: ${status.players.length}/${status.maxplayers}`)
+            .setColor(0x00FF00);
+        
+        if(status.players.length >= 1 && status.players[0].name) {
+            let playerList = status.players.map((pl) => pl.name || "").join("\n");
+            embd.addFields({name: "Players", value: `\`${playerList}\``});
+        }
+
+        return embd;
+    }
+
+    static async serverSendEvent(client: Client, event: ServerEventList, server: ServerEntry, gamedigResponse?: Gamedig.QueryResult, player_name?: string) {
         for (let usrId of server.users) {
             let user = UserEventManager.getUserId(usrId);
             if (user == null) continue;
@@ -101,24 +119,29 @@ class ServerEventManager {
                     console.error(`Failed to send message to user ${user.discord_id}:${user.id}`);
                     continue;
                 }
+                let embed = this.generateGenericEmbed(server, gamedigResponse);
                 switch (event) {
                     case 'connect':
-                        discordUser.send(`User connected: ${player_name}`);
+                        embed.setTitle(`User Connected: ${player_name}`)
+                        discordUser.send({embeds: [embed]});
                         break;
                     case 'disconnect':
-                        discordUser.send(`User disconnected: ${player_name}`);
+                        embed.setTitle(`User Disconnected: ${player_name}`)
+                        discordUser.send({embeds: [embed]});
                         break;
                     case 'empty':
-                        discordUser.send(`Server is empty`);
+                        embed.setTitle(`Server is empty`);
+                        discordUser.send({embeds: [embed]});
                         break;
                     case 'not_empty':
-                        discordUser.send(`Server is not empty`);
+                        embed.setTitle(`Server is no longer empty.`);
+                        discordUser.send({embeds: [embed]});
                         break;
                     case 'offline':
-                        discordUser.send(`Server is offline`);
+                        discordUser.send({embeds: [embed]});
                         break;
                     case 'online':
-                        discordUser.send(`Server is online`);
+                        discordUser.send({embeds: [embed]});
                         break;
                 }
             }
@@ -139,7 +162,7 @@ class ServerEventManager {
 
         if (server.previousServerState?.online == false) {
             // send event for server turned online
-            this.serverSendEvent(client, 'online', server);
+            this.serverSendEvent(client, 'online', server, resp);
 
             console.log("Server online");
         }
@@ -149,12 +172,12 @@ class ServerEventManager {
         if (server.previousServerState) {
             if (server.previousServerState.players.length == 0 && resp.players.length >= 1) {
                 // Send event for not empty
-                this.serverSendEvent(client, 'not_empty', server);
+                this.serverSendEvent(client, 'not_empty', server, resp);
 
                 console.log("Server no longer empty");
             } else if (server.previousServerState.players.length > 0 && resp.players.length == 0) {
                 // Send event for empty
-                this.serverSendEvent(client, 'empty', server);
+                this.serverSendEvent(client, 'empty', server, resp);
 
                 console.log("Server empty");
             }
@@ -162,7 +185,7 @@ class ServerEventManager {
             // New players (connect)
             for (let newPlayer of mappedPlayerNames) {
                 if (server.previousServerState.players.includes(newPlayer)) continue;
-                this.serverSendEvent(client, 'connect', server, newPlayer);
+                this.serverSendEvent(client, 'connect', server, resp, newPlayer);
 
                 console.log(`Player Connected ${newPlayer}`);
             }
@@ -171,7 +194,7 @@ class ServerEventManager {
             for (let oldPlayer of server.previousServerState.players) {
                 if (mappedPlayerNames.includes(oldPlayer)) continue;
 
-                this.serverSendEvent(client, 'disconnect', server, oldPlayer);
+                this.serverSendEvent(client, 'disconnect', server, resp, oldPlayer);
 
                 console.log(`Player Disconnected ${oldPlayer}`);
             }
