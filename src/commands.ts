@@ -1,6 +1,7 @@
-import { CacheType, ApplicationCommandDataResolvable, ApplicationCommandOptionType, ChatInputCommandInteraction, ApplicationCommandData } from "discord.js";
+import { CacheType, ApplicationCommandDataResolvable, ApplicationCommandOptionType, ChatInputCommandInteraction, ApplicationCommandData, EmbedBuilder } from "discord.js";
 import { ServerEventManager, ServerEvents } from "./server_events";
 import Gamedig from "gamedig";
+import { Database } from "./database/jsondb";
 
 
 type CommandEntry = {
@@ -11,16 +12,9 @@ type CommandEntry = {
 const CommandList: CommandEntry[] = [
     {
         discordCommand: {
-            name: "subscribe",
-            description: "Subscribe to a server method",
+            name: "addserver",
+            description: "Add a new server",
             options: [
-                {
-                    name: "event",
-                    description: "What event are you subscribing to",
-                    type: ApplicationCommandOptionType.String,
-                    choices: ServerEvents,
-                    required: true
-                },
                 {
                     name: "protocol",
                     description: "What protocol does the server use. Run /protocols to see a list, or go to gamedig",
@@ -44,10 +38,6 @@ const CommandList: CommandEntry[] = [
             ]
         },
         async method(interaction) {
-            // Handle server subscription
-            let caller = interaction.user.id;
-            
-            let eventName = interaction.options.getString("event", true);
             let protocol = interaction.options.getString("protocol", true);
             let address = interaction.options.getString("address", true);
             let port = interaction.options.getInteger("port", false);
@@ -56,11 +46,52 @@ const CommandList: CommandEntry[] = [
             
             try {
                 let response = await Gamedig.query({type: protocol as Gamedig.Type, host: address, port: port || undefined});
-                await interaction.editReply(`Got response: ${response.name}; ${response.players.length}/${response.maxplayers}; ${response.ping}ms`);
 
-                ServerEventManager.monitorEvent(eventName, protocol, address, port || undefined, caller);
+                let newServer = ServerEventManager.getOrCreateServer(protocol, address, port || undefined);
+
+                await interaction.editReply({embeds: [ServerEventManager.generateGenericEmbed(newServer, response).setTitle("Added new server to monitor")]});
             } catch (e) {
                 await interaction.editReply(`Failed to contact server - cancelling command.\n\`\`\`${e}\`\`\``);
+            }
+
+        },
+    },
+    {
+        discordCommand: {
+            name: "subscribe",
+            description: "Subscribe to a server event",
+            options: [
+                {
+                    name: "event",
+                    description: "What event are you subscribing to",
+                    type: ApplicationCommandOptionType.String,
+                    choices: ServerEvents,
+                    required: true
+                },
+                {
+                    name: "serverid",
+                    description: "Pick a server address and protocol from the list",
+                    type: ApplicationCommandOptionType.String,
+                    required: true,
+                    choices: Database.getData().servers.map((sv) => { 
+                        return {name: ServerEventManager.getServerDisplayName(sv), value: `${sv.id}`}
+                    })
+                }
+            ]
+        },
+        async method(interaction) {
+            let event = interaction.options.getString("event", true);
+            let serverid = interaction.options.getString("serverid", true);
+
+            await interaction.deferReply({ephemeral: true});
+        
+            let targetServer = Database.getData().servers.find((val) => val.id == Number(serverid));
+            if(targetServer) {
+                ServerEventManager.monitorEvent(event, targetServer.protocol, targetServer.ip, targetServer.port, interaction.user.id);
+
+                await interaction.editReply({embeds: [new EmbedBuilder().setDescription(`You will now recieve messages for the ${event} event, from ${ServerEventManager.getServerDisplayName(targetServer)}`)]});
+            } else {
+                await interaction.editReply("Server ID does not exist");
             }
 
         },
@@ -91,6 +122,43 @@ const CommandList: CommandEntry[] = [
         method(interaction) {
             // Remove subscription
         }
+    },
+    {
+        discordCommand: {
+            name: "status",
+            description: "Get server status",
+            options: [
+                {
+                    name: "serverid",
+                    description: "Pick a server address and protocol from the list",
+                    type: ApplicationCommandOptionType.String,
+                    required: true,
+                    choices: Database.getData().servers.map((sv) => { 
+                        return {name: ServerEventManager.getServerDisplayName(sv), value: `${sv.id}`}
+                    })
+                }
+            ]
+        },
+        async method(interaction) {
+            let serverid = interaction.options.getString("serverid", true);
+
+
+            await interaction.deferReply({ephemeral: false});
+            
+            try {
+                let targetServer = Database.getData().servers.find((val) => val.id == Number(serverid));
+                if(targetServer) {
+
+                    let response = await Gamedig.query({type: targetServer.protocol as Gamedig.Type, host: targetServer.ip, port: targetServer.port || undefined});
+                    await interaction.editReply({embeds: [ServerEventManager.generateGenericEmbed(targetServer, response)]});
+
+                } else {
+                    await interaction.editReply("Server ID does not exist");
+                }
+            } catch (e) {
+                await interaction.editReply(`Failed to contact server - cancelling command.\n\`\`\`${e}\`\`\``);
+            }
+        },
     }
 ];
 

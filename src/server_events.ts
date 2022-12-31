@@ -71,6 +71,13 @@ class UserEventManager {
 }
 
 class ServerEventManager {
+    static getServerDisplayName(sv: ServerEntry) {
+        if(sv.port) {
+            `${sv.ip}:${sv.port}/${sv.protocol}`;
+        }
+        return `${sv.ip}/${sv.protocol}`;
+    }
+
     static async performServerSweep(client: Client) {
         console.log("Performing server sweep");
         let db = Database.getData();
@@ -96,7 +103,7 @@ class ServerEventManager {
         }
         let embd = new EmbedBuilder()
             .setTitle("Server Information: Online")
-            .setDescription(`Game: ${server.protocol}\nName: ${status.name}\nPlayers: ${status.players.length}/${status.maxplayers}`)
+            .setDescription(`Game: ${server.protocol}\nAddress: ${status.connect}\nName: ${status.name}\nPlayers: ${status.players.length}/${status.maxplayers}`)
             .setColor(0x00FF00);
         
         if(status.players.length >= 1 && status.players[0].name) {
